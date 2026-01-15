@@ -8,6 +8,11 @@ const getAllPosts = async (payload: {
   isFeatured?: boolean | undefined;
   status?: PostStatus | undefined;
   authorId?: string | undefined;
+  page?: number;
+  limit?: number;
+  skip?: number;
+  sortBy?: string;
+  sortOrder?: "asc" | "desc";
 }) => {
   const andConditions: PostWhereInput[] = [];
 
@@ -59,11 +64,71 @@ const getAllPosts = async (payload: {
     });
   }
 
+  console.log("Pagination params:", {
+    take: payload.limit,
+    skip: payload.skip,
+  });
+
   const posts = await prisma.post.findMany({
+    take: payload.limit ?? 10,
+    skip: payload.skip ?? 0,
+    where: andConditions.length > 0 ? { AND: andConditions } : {},
+    orderBy: payload.sortBy
+      ? {
+          [payload.sortBy]: payload.sortOrder ?? "desc",
+        }
+      : { createdAt: "desc" },
+  });
+
+  const totalCount = await prisma.post.count({
     where: andConditions.length > 0 ? { AND: andConditions } : {},
   });
 
-  return posts;
+  return {
+    data: posts,
+    pagination: {
+      totalCount,
+      page: payload.page,
+      limit: payload.limit,
+      totalPages: Math.ceil(totalCount / (payload.limit || 2)),
+    },
+  };
+};
+
+const getPostById = async (postId: string) => {
+  return await prisma.$transaction(async (tx) => {
+    await tx.post.update({
+      where: { id: postId },
+      data: {
+        views: { increment: 1 },
+      },
+    });
+    const postData = await tx.post.findUnique({
+      where: { id: postId },
+      include: {
+        comments: {
+          where: { parentId: null, status: "APPROVED" },
+          orderBy: { createdAt: "desc" },
+          include: {
+            comments: {
+              where: { status: "APPROVED" },
+              orderBy: { createdAt: "asc" },
+              include: {
+                comments: {
+                  where: { status: "APPROVED" },
+                  orderBy: { createdAt: "asc" },
+                },
+              },
+            },
+          }, // this is replies although named comments, schema should be changed
+        },
+        _count: {
+          select: { comments: true },
+        },
+      },
+    });
+    return postData;
+  });
 };
 
 const createPost = async (
@@ -83,4 +148,5 @@ const createPost = async (
 export const postService = {
   createPost,
   getAllPosts,
+  getPostById,
 };

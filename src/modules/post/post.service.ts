@@ -1,3 +1,4 @@
+import { debug } from "node:console";
 import { Post, PostStatus } from "../../../generated/prisma/client";
 import { PostWhereInput } from "../../../generated/prisma/models";
 import { prisma } from "../../lib/prisma";
@@ -78,6 +79,11 @@ const getAllPosts = async (payload: {
           [payload.sortBy]: payload.sortOrder ?? "desc",
         }
       : { createdAt: "desc" },
+    include: {
+      _count: {
+        select: { comments: true },
+      },
+    },
   });
 
   const totalCount = await prisma.post.count({
@@ -145,8 +151,144 @@ const createPost = async (
   return result;
 };
 
+const getMyPosts = async (authorId: string) => {
+  const userInfo = await prisma.user.findUniqueOrThrow({
+    where: { id: authorId },
+    select: { id: true, status: true, role: true },
+  });
+
+  const comments = await prisma.comment.findMany({
+    where: { authorId },
+    orderBy: { createdAt: "desc" },
+    include: {
+      post: {
+        select: {
+          title: true,
+          id: true,
+          views: true,
+          _count: { select: { comments: true } },
+        },
+      },
+      comments: {
+        where: { status: "APPROVED" },
+        orderBy: { createdAt: "asc" },
+      },
+    },
+  });
+  const totalPosts = await prisma.comment.aggregate({
+    where: { authorId },
+    _count: true,
+  });
+
+  return { data: comments, totalPosts };
+};
+
+const updatePost = async (
+  postId: string,
+  data: Partial<Post>,
+  authorId: string,
+  isAdmin: boolean
+) => {
+  const post = await prisma.post.findUnique({
+    where: { id: postId },
+  });
+
+  if (!post) {
+    throw new Error("Post not found");
+  }
+
+  if (!isAdmin && post.authorId !== authorId) {
+    throw new Error("Unauthorized: You can only update your own posts");
+  }
+
+  if (!isAdmin) {
+    delete data.isFeatured;
+  }
+
+  const updatedPost = await prisma.post.update({
+    where: { id: postId },
+    data,
+  });
+  return updatedPost;
+};
+
+const deletePost = async (
+  postId: string,
+  authorId: string,
+  isAdmin: boolean
+) => {
+  const post = await prisma.post.findUnique({
+    where: { id: postId },
+  });
+
+  if (!post) {
+    throw new Error("Post not found");
+  }
+  if (!isAdmin && post.authorId !== authorId) {
+    throw new Error("Unauthorized: You can only delete your own posts");
+  }
+
+  return await prisma.post.delete({
+    where: { id: postId },
+  });
+};
+
+const getStats = async () => {
+  return await prisma.$transaction(async (tx) => {
+    const [
+      totalPosts,
+      totalViews,
+      featuredPosts,
+      archivedPosts,
+      totalComments,
+      approvedComments,
+      rejectedComments,
+      totalUsers,
+      totalAdmins,
+    ] = await Promise.all([
+      tx.post.count(),
+      tx.post.count({
+        where: { views: { gt: 0 } },
+      }),
+      tx.post.count({
+        where: { isFeatured: true },
+      }),
+      tx.post.count({
+        where: { status: "ARCHIVED" },
+      }),
+      tx.comment.count(),
+      tx.comment.count({
+        where: { status: "APPROVED" },
+      }),
+      tx.comment.count({
+        where: { status: "REJECTED" },
+      }),
+      tx.user.count(),
+      tx.user.count({
+        where: { role: "ADMIN" },
+      }),
+    ]);
+
+    return {
+      totalPosts,
+      totalViews,
+      featuredPosts,
+      archivedPosts,
+      totalComments,
+      approvedComments,
+      rejectedComments,
+      totalUsers,
+      totalAdmins,
+    };
+  });
+};
+
 export const postService = {
   createPost,
   getAllPosts,
   getPostById,
+  getMyPosts,
+  updatePost,
+  deletePost,
+  getStats,
 };

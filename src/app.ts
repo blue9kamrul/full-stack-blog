@@ -4,6 +4,8 @@ import { postRouter } from "./modules/post/post.router";
 import { auth } from "./lib/auth";
 import { toNodeHandler } from "better-auth/node";
 import { commentRouter } from "./modules/post/comment/comment.router";
+import { error } from "node:console";
+import errorHandler from "./middlewares/globalErrorHandler";
 
 const app: Application = express();
 
@@ -22,6 +24,8 @@ app.use("/api/auth", toNodeHandler(auth));
 app.use("/posts", postRouter);
 
 app.use("/comments", commentRouter);
+
+app.use(errorHandler);
 
 app.get("/", (req, res) => {
   res.send("Welcome to the Blog API");

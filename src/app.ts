@@ -6,6 +6,7 @@ import { toNodeHandler } from "better-auth/node";
 import { commentRouter } from "./modules/post/comment/comment.router";
 import { error } from "node:console";
 import errorHandler from "./middlewares/globalErrorHandler";
+import { notFound } from "./middlewares/notFound";
 
 const app: Application = express();
 
@@ -24,6 +25,8 @@ app.use("/api/auth", toNodeHandler(auth));
 app.use("/posts", postRouter);
 
 app.use("/comments", commentRouter);
+
+app.use(notFound);
 
 app.use(errorHandler);
 
